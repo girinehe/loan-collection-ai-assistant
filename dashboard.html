@@ -1,0 +1,2272 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Collections Worklist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===========================================================
+   Loan Collection Assistant — prototype dashboard
+   Layout: sticky summary header -> filter bar -> accordion
+   worklist, one card per loan, expanding to show the full
+   decision trail (rules engine -> AI draft -> human approval
+   -> audit log) for that single loan.
+   =========================================================== */
+:root{
+  --bg:#EEF1F4; --surface:#FFFFFF; --surface-raised:#FFFFFF;
+  --ink:#11223A; --ink-soft:#4C5C72; --ink-faint:#8294A8;
+  --border:#D7DEE6; --border-soft:#E5EAEF;
+  --accent:#0F6E5C; --accent-soft:#E4F2EE;
+  --auto:#1C8A5E; --auto-soft:#E4F4EC;
+  --human:#B4601A; --human-soft:#FBEEE0;
+  --sev-normal:#2E8B57; --sev-pdo1:#4E8E8E; --sev-pdo2:#C08A2E;
+  --sev-pdo3:#C0612E; --sev-nab:#B23A3A; --sev-closed:#6B7C8F;
+  --edited:#8A5FB0; --edited-soft:#F0E9F7;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0B1420; --surface:#121D2C; --surface-raised:#16233480;
+    --ink:#E8EDF3; --ink-soft:#9FB0C3; --ink-faint:#6C7E92;
+    --border:#223346; --border-soft:#1B2A3C;
+    --accent:#35C2A0; --accent-soft:#113228;
+    --auto:#3FAE7D; --auto-soft:#102C20;
+    --human:#E0923C; --human-soft:#2E1F0E;
+    --sev-normal:#4FAE7D; --sev-pdo1:#6FB3B3; --sev-pdo2:#D9A64E;
+    --sev-pdo3:#D97E4E; --sev-nab:#D96060; --sev-closed:#8599AC;
+    --edited:#B18AD9; --edited-soft:#241A33;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0B1420; --surface:#121D2C; --surface-raised:#16233480;
+  --ink:#E8EDF3; --ink-soft:#9FB0C3; --ink-faint:#6C7E92;
+  --border:#223346; --border-soft:#1B2A3C;
+  --accent:#35C2A0; --accent-soft:#113228;
+  --auto:#3FAE7D; --auto-soft:#102C20;
+  --human:#E0923C; --human-soft:#2E1F0E;
+  --sev-normal:#4FAE7D; --sev-pdo1:#6FB3B3; --sev-pdo2:#D9A64E;
+  --sev-pdo3:#D97E4E; --sev-nab:#D96060; --sev-closed:#8599AC;
+  --edited:#B18AD9; --edited-soft:#241A33;
+  color-scheme: dark;
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-ui); font-size:14px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+body::before{
+  content:""; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top,0px);
+  z-index:10; background:var(--bg);
+}
+h1,h2,h3{font-family:var(--font-ui); margin:0; text-wrap:balance;}
+.mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+[hidden]{display:none!important;}
+button{font-family:inherit;}
+
+/* ---------- top bar ---------- */
+.topbar{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:5;
+  background:var(--bg); padding-top:18px; padding-bottom:14px;
+  border-bottom:1px solid var(--border);
+}
+.brand{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
+.brand h1{font-size:19px; font-weight:700; letter-spacing:-0.01em;}
+.brand .tag{
+  font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--accent); background:var(--accent-soft); padding:3px 8px; border-radius:4px;
+}
+.subtitle{color:var(--ink-soft); font-size:13px; margin-top:4px; max-width:60ch;}
+
+/* ---------- stat tiles ---------- */
+.stats{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:16px;
+}
+@media (max-width:620px){ .stats{grid-template-columns:repeat(2,1fr);} }
+.stat{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:12px 14px; min-width:0;
+}
+.stat .n{font-family:var(--font-mono); font-size:24px; font-weight:600; line-height:1;}
+.stat .l{font-size:11.5px; color:var(--ink-soft); margin-top:5px; letter-spacing:.01em;}
+.stat.auto .n{color:var(--auto);}
+.stat.human .n{color:var(--human);}
+
+/* ---------- filter bar ---------- */
+.filters{
+  display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:16px;
+}
+.chip{
+  border:1px solid var(--border); background:var(--surface); color:var(--ink-soft);
+  border-radius:999px; padding:6px 12px; font-size:12.5px; font-weight:500;
+  cursor:pointer; transition:background .12s, color .12s, border-color .12s;
+}
+.chip:hover{border-color:var(--ink-faint);}
+.chip[aria-pressed="true"]{
+  background:var(--ink); color:var(--bg); border-color:var(--ink);
+}
+.searchwrap{margin-left:auto; min-width:0; flex:1 1 180px;}
+#search{
+  width:100%; padding:7px 11px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface); color:var(--ink); font-size:13px;
+}
+#search:focus{outline:2px solid var(--accent); outline-offset:1px;}
+
+/* ---------- worklist ---------- */
+.worklist{margin-top:16px; padding-bottom:40px; display:flex; flex-direction:column; gap:8px;}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  overflow:hidden;
+}
+.row{
+  display:grid; grid-template-columns:auto 1fr auto auto auto; gap:12px; align-items:center;
+  padding:12px 14px; cursor:pointer; min-width:0;
+}
+.row:focus-visible{outline:2px solid var(--accent); outline-offset:-2px;}
+@media (max-width:560px){
+  .row{grid-template-columns:1fr auto; grid-template-areas:"id badge" "name badge" "meta meta";}
+  .row .col-id{grid-area:id;} .row .col-name{grid-area:name;}
+  .row .col-dpd{display:none;}
+  .row .col-decision{grid-area:badge;}
+}
+.col-id{font-family:var(--font-mono); font-size:12.5px; color:var(--ink-faint); min-width:0;}
+.col-name{min-width:0;}
+.col-name .n{font-weight:600; font-size:13.5px;}
+.col-name .p{color:var(--ink-soft); font-size:12px; margin-top:1px;}
+.col-dpd{font-family:var(--font-mono); font-size:12.5px; color:var(--ink-soft); white-space:nowrap;}
+.badge{
+  display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600;
+  padding:4px 9px; border-radius:999px; white-space:nowrap; letter-spacing:.01em;
+}
+.badge .dot{width:6px; height:6px; border-radius:50%; background:currentColor;}
+.badge.st-normal{color:var(--sev-normal); background:color-mix(in srgb, var(--sev-normal) 14%, transparent);}
+.badge.st-pdo1{color:var(--sev-pdo1); background:color-mix(in srgb, var(--sev-pdo1) 14%, transparent);}
+.badge.st-pdo2{color:var(--sev-pdo2); background:color-mix(in srgb, var(--sev-pdo2) 16%, transparent);}
+.badge.st-pdo3{color:var(--sev-pdo3); background:color-mix(in srgb, var(--sev-pdo3) 16%, transparent);}
+.badge.st-nab{color:var(--sev-nab); background:color-mix(in srgb, var(--sev-nab) 16%, transparent);}
+.badge.st-written_off{color:var(--sev-closed); background:color-mix(in srgb, var(--sev-closed) 16%, transparent);}
+.badge.dec-auto{color:var(--auto); background:var(--auto-soft);}
+.badge.dec-human{color:var(--human); background:var(--human-soft);}
+.chev{color:var(--ink-faint); transition:transform .15s; flex-shrink:0;}
+.card[data-open="true"] .chev{transform:rotate(90deg);}
+
+/* ---------- detail panel ---------- */
+.detail{border-top:1px solid var(--border-soft); padding:16px 14px 18px; display:flex; flex-direction:column; gap:16px;}
+.detail-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+@media (max-width:560px){ .detail-grid{grid-template-columns:repeat(2,1fr);} }
+.fact .k{font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint);}
+.fact .v{font-family:var(--font-mono); font-size:13px; margin-top:2px;}
+
+.block{
+  border:1px solid var(--border-soft); border-radius:8px; padding:12px 13px;
+  background:var(--surface-raised);
+}
+.block-head{display:flex; align-items:center; gap:8px; margin-bottom:8px;}
+.block-head .ico{
+  width:20px; height:20px; border-radius:5px; display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; font-size:11px; font-weight:700;
+}
+.block-head h3{font-size:12.5px; font-weight:600;}
+.block.engine .ico{background:var(--accent-soft); color:var(--accent);}
+.block.ai .ico{background:#E7E3F7; color:#6B4FB0;}
+:root[data-theme="dark"] .block.ai .ico, @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .block.ai .ico{background:#241A33; color:#B18AD9;} }
+.block.approval .ico{background:var(--human-soft); color:var(--human);}
+.block.audit .ico{background:var(--border-soft); color:var(--ink-soft);}
+
+.reason{font-size:12.5px; color:var(--ink-soft);}
+.draft-text{
+  font-size:13px; background:var(--bg); border:1px solid var(--border-soft); border-radius:6px;
+  padding:9px 10px; margin-top:4px; line-height:1.5;
+}
+.revise-tag{
+  display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;
+  color:var(--edited); background:var(--edited-soft); padding:2px 8px; border-radius:999px; margin-top:7px;
+}
+.revise-note{font-size:11.5px; color:var(--ink-soft); margin-top:5px; line-height:1.45;}
+
+.approval-meta{display:flex; flex-wrap:wrap; gap:4px 14px; font-size:12px; color:var(--ink-soft); margin-bottom:6px;}
+.approval-meta b{color:var(--ink); font-weight:600;}
+.decision-pill{
+  display:inline-flex; font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:999px;
+  background:var(--auto-soft); color:var(--auto); margin-bottom:7px;
+}
+.decision-pill.edited{background:var(--edited-soft); color:var(--edited);}
+.comment{font-size:12.5px; line-height:1.5; font-style:italic; color:var(--ink);}
+
+.audit-list{display:flex; flex-direction:column; gap:7px; max-height:180px; overflow-y:auto;}
+.audit-item{font-size:11.5px; border-left:2px solid var(--border); padding-left:9px;}
+.audit-item .t{font-family:var(--font-mono); color:var(--ink-faint); font-size:10.5px;}
+.audit-item .r{color:var(--ink-soft); font-weight:600; margin:1px 0;}
+.audit-item .o{color:var(--ink);}
+
+.empty{text-align:center; color:var(--ink-soft); padding:40px 20px; font-size:13px;}
+
+footer{color:var(--ink-faint); font-size:11.5px; text-align:center; padding:8px 0 28px;}
+</style>
+
+<div class="topbar">
+  <div class="brand">
+    <h1>Collections Worklist</h1>
+    <span class="tag">Prototype · Synthetic data</span>
+  </div>
+  <p class="subtitle">Rules engine + AI drafting + human approval, end to end, for 20 synthetic loan accounts. Click any row to see the full decision trail.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="n mono" id="stat-total">—</div><div class="l">Loans tracked</div></div>
+    <div class="stat auto"><div class="n mono" id="stat-auto">—</div><div class="l">Handled automatically</div></div>
+    <div class="stat human"><div class="n mono" id="stat-human">—</div><div class="l">Needed a human decision</div></div>
+    <div class="stat"><div class="n mono" id="stat-audit">—</div><div class="l">Audit entries logged</div></div>
+  </div>
+
+  <div class="filters">
+    <button class="chip" data-filter="all" aria-pressed="true">All statuses</button>
+    <button class="chip" data-filter="Normal" aria-pressed="false">Normal</button>
+    <button class="chip" data-filter="PDO1" aria-pressed="false">PDO1</button>
+    <button class="chip" data-filter="PDO2" aria-pressed="false">PDO2</button>
+    <button class="chip" data-filter="PDO3" aria-pressed="false">PDO3</button>
+    <button class="chip" data-filter="NAB" aria-pressed="false">NAB</button>
+    <button class="chip" data-filter="Written_Off" aria-pressed="false">Written off</button>
+    <div class="searchwrap"><input id="search" type="text" placeholder="Search loan ID or customer…" /></div>
+  </div>
+</div>
+
+<div class="worklist" id="worklist"></div>
+<footer>Loan Collection Assistant — Step 7 prototype · All customer names, loan numbers and amounts are synthetic</footer>
+
+<script id="dashboard-data" type="application/json">
+{
+ "loans": [
+  {
+   "loan_id": "LN00001",
+   "customer_id": "CUST0001",
+   "customer_name": "Meera Sharma",
+   "product_type": "Home Loan",
+   "principal_amount": 350000,
+   "disbursement_date": "2022-07-29",
+   "emi_amount": 15340,
+   "tenure_months": 24,
+   "interest_rate": 10.34,
+   "loan_status": "Normal",
+   "days_past_due": 0,
+   "next_due_date": "2026-11-03",
+   "last_payment_date": "2026-10-09"
+  },
+  {
+   "loan_id": "LN00002",
+   "customer_id": "CUST0002",
+   "customer_name": "Vijay Singh",
+   "product_type": "Personal Loan",
+   "principal_amount": 200000,
+   "disbursement_date": "2024-10-31",
+   "emi_amount": 17570,
+   "tenure_months": 12,
+   "interest_rate": 10.81,
+   "loan_status": "Normal",
+   "days_past_due": 0,
+   "next_due_date": "2026-11-05",
+   "last_payment_date": "2026-10-11"
+  },
+  {
+   "loan_id": "LN00003",
+   "customer_id": "CUST0003",
+   "customer_name": "Lata Gupta",
+   "product_type": "Business Loan",
+   "principal_amount": 350000,
+   "disbursement_date": "2022-01-14",
+   "emi_amount": 7770,
+   "tenure_months": 48,
+   "interest_rate": 13.04,
+   "loan_status": "Normal",
+   "days_past_due": 0,
+   "next_due_date": "2026-10-22",
+   "last_payment_date": "2026-09-28"
+  },
+  {
+   "loan_id": "LN00004",
+   "customer_id": "CUST0004",
+   "customer_name": "Amit Mehta",
+   "product_type": "Auto Loan",
+   "principal_amount": 350000,
+   "disbursement_date": "2024-02-18",
+   "emi_amount": 10210,
+   "tenure_months": 36,
+   "interest_rate": 10.11,
+   "loan_status": "Normal",
+   "days_past_due": 0,
+   "next_due_date": "2026-10-20",
+   "last_payment_date": "2026-09-30"
+  },
+  {
+   "loan_id": "LN00005",
+   "customer_id": "CUST0005",
+   "customer_name": "Neha Menon",
+   "product_type": "Home Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2025-01-03",
+   "emi_amount": 222790,
+   "tenure_months": 12,
+   "interest_rate": 13.88,
+   "loan_status": "Normal",
+   "days_past_due": 0,
+   "next_due_date": "2026-10-20",
+   "last_payment_date": "2026-09-29"
+  },
+  {
+   "loan_id": "LN00006",
+   "customer_id": "CUST0006",
+   "customer_name": "Arjun Shetty",
+   "product_type": "Home Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2024-01-11",
+   "emi_amount": 44750,
+   "tenure_months": 60,
+   "interest_rate": 14.81,
+   "loan_status": "Normal",
+   "days_past_due": 0,
+   "next_due_date": "2026-11-04",
+   "last_payment_date": "2026-10-05"
+  },
+  {
+   "loan_id": "LN00007",
+   "customer_id": "CUST0007",
+   "customer_name": "Arjun Patel",
+   "product_type": "Auto Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2023-04-22",
+   "emi_amount": 74800,
+   "tenure_months": 36,
+   "interest_rate": 15.41,
+   "loan_status": "PDO1",
+   "days_past_due": 28,
+   "next_due_date": "2026-10-18",
+   "last_payment_date": "2026-08-26"
+  },
+  {
+   "loan_id": "LN00008",
+   "customer_id": "CUST0008",
+   "customer_name": "Deepak Mehta",
+   "product_type": "Business Loan",
+   "principal_amount": 1500000,
+   "disbursement_date": "2023-12-29",
+   "emi_amount": 43850,
+   "tenure_months": 36,
+   "interest_rate": 10.48,
+   "loan_status": "PDO1",
+   "days_past_due": 7,
+   "next_due_date": "2026-11-08",
+   "last_payment_date": "2026-09-11"
+  },
+  {
+   "loan_id": "LN00009",
+   "customer_id": "CUST0009",
+   "customer_name": "Arjun Menon",
+   "product_type": "Auto Loan",
+   "principal_amount": 1000000,
+   "disbursement_date": "2024-02-17",
+   "emi_amount": 43850,
+   "tenure_months": 24,
+   "interest_rate": 10.48,
+   "loan_status": "PDO1",
+   "days_past_due": 9,
+   "next_due_date": "2026-11-06",
+   "last_payment_date": "2026-09-10"
+  },
+  {
+   "loan_id": "LN00010",
+   "customer_id": "CUST0010",
+   "customer_name": "Amit Patel",
+   "product_type": "Auto Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2024-04-01",
+   "emi_amount": 223260,
+   "tenure_months": 12,
+   "interest_rate": 14.33,
+   "loan_status": "PDO1",
+   "days_past_due": 9,
+   "next_due_date": "2026-11-06",
+   "last_payment_date": "2026-09-15"
+  },
+  {
+   "loan_id": "LN00011",
+   "customer_id": "CUST0011",
+   "customer_name": "Rahul Agarwal",
+   "product_type": "Home Loan",
+   "principal_amount": 350000,
+   "disbursement_date": "2025-08-09",
+   "emi_amount": 7720,
+   "tenure_months": 48,
+   "interest_rate": 11.87,
+   "loan_status": "PDO2",
+   "days_past_due": 45,
+   "next_due_date": "2026-10-01",
+   "last_payment_date": "2026-08-08"
+  },
+  {
+   "loan_id": "LN00012",
+   "customer_id": "CUST0012",
+   "customer_name": "Sanjay Iyer",
+   "product_type": "Auto Loan",
+   "principal_amount": 1500000,
+   "disbursement_date": "2026-03-10",
+   "emi_amount": 26590,
+   "tenure_months": 60,
+   "interest_rate": 12.73,
+   "loan_status": "PDO2",
+   "days_past_due": 49,
+   "next_due_date": "2026-09-27",
+   "last_payment_date": "2026-07-26"
+  },
+  {
+   "loan_id": "LN00013",
+   "customer_id": "CUST0013",
+   "customer_name": "Vijay Kulkarni",
+   "product_type": "Home Loan",
+   "principal_amount": 350000,
+   "disbursement_date": "2022-07-06",
+   "emi_amount": 15500,
+   "tenure_months": 24,
+   "interest_rate": 12.56,
+   "loan_status": "PDO2",
+   "days_past_due": 55,
+   "next_due_date": "2026-09-21",
+   "last_payment_date": "2026-08-01"
+  },
+  {
+   "loan_id": "LN00014",
+   "customer_id": "CUST0014",
+   "customer_name": "Meera Iyer",
+   "product_type": "Auto Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2024-02-28",
+   "emi_amount": 55490,
+   "tenure_months": 48,
+   "interest_rate": 13.08,
+   "loan_status": "PDO2",
+   "days_past_due": 43,
+   "next_due_date": "2026-10-03",
+   "last_payment_date": "2026-07-31"
+  },
+  {
+   "loan_id": "LN00015",
+   "customer_id": "CUST0015",
+   "customer_name": "Suresh Mehta",
+   "product_type": "Personal Loan",
+   "principal_amount": 1500000,
+   "disbursement_date": "2025-01-04",
+   "emi_amount": 133490,
+   "tenure_months": 12,
+   "interest_rate": 13.59,
+   "loan_status": "PDO3",
+   "days_past_due": 85,
+   "next_due_date": "2026-08-22",
+   "last_payment_date": "2026-06-25"
+  },
+  {
+   "loan_id": "LN00016",
+   "customer_id": "CUST0016",
+   "customer_name": "Amit Reddy",
+   "product_type": "Home Loan",
+   "principal_amount": 750000,
+   "disbursement_date": "2026-01-18",
+   "emi_amount": 33160,
+   "tenure_months": 24,
+   "interest_rate": 12.22,
+   "loan_status": "PDO3",
+   "days_past_due": 89,
+   "next_due_date": "2026-08-18",
+   "last_payment_date": "2026-06-21"
+  },
+  {
+   "loan_id": "LN00017",
+   "customer_id": "CUST0017",
+   "customer_name": "Suresh Nair",
+   "product_type": "Personal Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2024-11-05",
+   "emi_amount": 74500,
+   "tenure_months": 36,
+   "interest_rate": 14.55,
+   "loan_status": "PDO3",
+   "days_past_due": 80,
+   "next_due_date": "2026-08-27",
+   "last_payment_date": "2026-07-02"
+  },
+  {
+   "loan_id": "LN00018",
+   "customer_id": "CUST0018",
+   "customer_name": "Vikram Pillai",
+   "product_type": "Auto Loan",
+   "principal_amount": 1000000,
+   "disbursement_date": "2025-05-11",
+   "emi_amount": 17920,
+   "tenure_months": 60,
+   "interest_rate": 15.01,
+   "loan_status": "NAB",
+   "days_past_due": 115,
+   "next_due_date": "2026-07-23",
+   "last_payment_date": "2026-05-09"
+  },
+  {
+   "loan_id": "LN00019",
+   "customer_id": "CUST0019",
+   "customer_name": "Ravi Reddy",
+   "product_type": "Home Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2023-05-09",
+   "emi_amount": 73240,
+   "tenure_months": 36,
+   "interest_rate": 10.94,
+   "loan_status": "NAB",
+   "days_past_due": 131,
+   "next_due_date": "2026-07-07",
+   "last_payment_date": "2026-04-08"
+  },
+  {
+   "loan_id": "LN00020",
+   "customer_id": "CUST0020",
+   "customer_name": "Arjun Kumar",
+   "product_type": "Business Loan",
+   "principal_amount": 2500000,
+   "disbursement_date": "2024-12-26",
+   "emi_amount": 224340,
+   "tenure_months": 12,
+   "interest_rate": 15.37,
+   "loan_status": "Written_Off",
+   "days_past_due": 212,
+   "next_due_date": "2026-04-17",
+   "last_payment_date": "2026-01-09"
+  }
+ ],
+ "cases": [
+  {
+   "case_id": "CASE00001",
+   "loan_id": "LN00007",
+   "case_opened_date": "2026-09-21",
+   "assigned_agent": "AgentPro Collections (Outsourced)",
+   "agent_type": "Outsourced",
+   "case_status": "P2P_Honoured",
+   "p2p_date": "2026-09-26",
+   "p2p_amount": 74800,
+   "contact_channel": "Email",
+   "contact_count": 4,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00002",
+   "loan_id": "LN00008",
+   "case_opened_date": "2026-10-10",
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "agent_type": "Outsourced",
+   "case_status": "P2P_Honoured",
+   "p2p_date": "2026-10-17",
+   "p2p_amount": 43850,
+   "contact_channel": "WhatsApp",
+   "contact_count": 8,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00003",
+   "loan_id": "LN00009",
+   "case_opened_date": "2026-10-10",
+   "assigned_agent": "S. Naik (Internal)",
+   "agent_type": "Internal",
+   "case_status": "Open",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "SMS",
+   "contact_count": 2,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00004",
+   "loan_id": "LN00010",
+   "case_opened_date": "2026-10-09",
+   "assigned_agent": "M. Iyer (Internal)",
+   "agent_type": "Internal",
+   "case_status": "Open",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "SMS",
+   "contact_count": 4,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00005",
+   "loan_id": "LN00011",
+   "case_opened_date": "2026-09-01",
+   "assigned_agent": "R. Thakur (Internal)",
+   "agent_type": "Internal",
+   "case_status": "P2P_Set",
+   "p2p_date": "2026-09-07",
+   "p2p_amount": 7720,
+   "contact_channel": "Call",
+   "contact_count": 6,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00006",
+   "loan_id": "LN00012",
+   "case_opened_date": "2026-08-28",
+   "assigned_agent": "AgentPro Collections (Outsourced)",
+   "agent_type": "Outsourced",
+   "case_status": "Open",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "Email",
+   "contact_count": 4,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00007",
+   "loan_id": "LN00013",
+   "case_opened_date": "2026-08-23",
+   "assigned_agent": "S. Naik (Internal)",
+   "agent_type": "Internal",
+   "case_status": "Open",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "Email",
+   "contact_count": 7,
+   "escalation_level": 1,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00008",
+   "loan_id": "LN00014",
+   "case_opened_date": "2026-09-04",
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "agent_type": "Outsourced",
+   "case_status": "P2P_Set",
+   "p2p_date": "2026-09-17",
+   "p2p_amount": 55490,
+   "contact_channel": "WhatsApp",
+   "contact_count": 7,
+   "escalation_level": 0,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00009",
+   "loan_id": "LN00015",
+   "case_opened_date": "2026-07-26",
+   "assigned_agent": "R. Thakur (Internal)",
+   "agent_type": "Internal",
+   "case_status": "Escalated",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "Call",
+   "contact_count": 7,
+   "escalation_level": 1,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00010",
+   "loan_id": "LN00016",
+   "case_opened_date": "2026-07-21",
+   "assigned_agent": "S. Naik (Internal)",
+   "agent_type": "Internal",
+   "case_status": "P2P_Broken",
+   "p2p_date": "2026-07-27",
+   "p2p_amount": 33160,
+   "contact_channel": "Email",
+   "contact_count": 3,
+   "escalation_level": 1,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00011",
+   "loan_id": "LN00017",
+   "case_opened_date": "2026-07-31",
+   "assigned_agent": "S. Naik (Internal)",
+   "agent_type": "Internal",
+   "case_status": "P2P_Broken",
+   "p2p_date": "2026-08-10",
+   "p2p_amount": 74500,
+   "contact_channel": "Call",
+   "contact_count": 8,
+   "escalation_level": 2,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00012",
+   "loan_id": "LN00018",
+   "case_opened_date": "2026-06-23",
+   "assigned_agent": "M. Iyer (Internal)",
+   "agent_type": "Internal",
+   "case_status": "Escalated",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "Call",
+   "contact_count": 2,
+   "escalation_level": 2,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00013",
+   "loan_id": "LN00019",
+   "case_opened_date": "2026-06-08",
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "agent_type": "Outsourced",
+   "case_status": "Escalated",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "Email",
+   "contact_count": 8,
+   "escalation_level": 2,
+   "notes": null
+  },
+  {
+   "case_id": "CASE00014",
+   "loan_id": "LN00020",
+   "case_opened_date": "2026-03-19",
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "agent_type": "Outsourced",
+   "case_status": "Closed",
+   "p2p_date": null,
+   "p2p_amount": null,
+   "contact_channel": "Call",
+   "contact_count": 3,
+   "escalation_level": 3,
+   "notes": null
+  }
+ ],
+ "payments": [
+  {
+   "payment_id": "PAY00001",
+   "loan_id": "LN00001",
+   "payment_date": "2022-08-28",
+   "amount": 9130,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00002",
+   "loan_id": "LN00001",
+   "payment_date": "2022-09-27",
+   "amount": 15340,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00003",
+   "loan_id": "LN00001",
+   "payment_date": "2022-10-27",
+   "amount": 15340,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00004",
+   "loan_id": "LN00001",
+   "payment_date": "2022-11-26",
+   "amount": 15340,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00005",
+   "loan_id": "LN00001",
+   "payment_date": "2022-12-26",
+   "amount": 15340,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00006",
+   "loan_id": "LN00002",
+   "payment_date": "2024-11-30",
+   "amount": 17570,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00007",
+   "loan_id": "LN00002",
+   "payment_date": "2024-12-30",
+   "amount": 17570,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00008",
+   "loan_id": "LN00002",
+   "payment_date": "2025-01-29",
+   "amount": 11220,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00009",
+   "loan_id": "LN00002",
+   "payment_date": "2025-02-28",
+   "amount": 17570,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00010",
+   "loan_id": "LN00002",
+   "payment_date": "2025-03-30",
+   "amount": 8660,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00011",
+   "loan_id": "LN00002",
+   "payment_date": "2025-04-29",
+   "amount": 14600,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00012",
+   "loan_id": "LN00003",
+   "payment_date": "2022-02-13",
+   "amount": 7770,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00013",
+   "loan_id": "LN00003",
+   "payment_date": "2022-03-15",
+   "amount": 7770,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00014",
+   "loan_id": "LN00004",
+   "payment_date": "2024-03-19",
+   "amount": 10210,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00015",
+   "loan_id": "LN00004",
+   "payment_date": "2024-04-18",
+   "amount": 10210,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00016",
+   "loan_id": "LN00005",
+   "payment_date": "2025-02-02",
+   "amount": 222790,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00017",
+   "loan_id": "LN00005",
+   "payment_date": "2025-03-04",
+   "amount": 222790,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00018",
+   "loan_id": "LN00005",
+   "payment_date": "2025-04-03",
+   "amount": 222790,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00019",
+   "loan_id": "LN00005",
+   "payment_date": "2025-05-03",
+   "amount": 161020,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00020",
+   "loan_id": "LN00005",
+   "payment_date": "2025-06-02",
+   "amount": 222790,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00021",
+   "loan_id": "LN00005",
+   "payment_date": "2025-07-02",
+   "amount": 158310,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00022",
+   "loan_id": "LN00006",
+   "payment_date": "2024-02-10",
+   "amount": 22670,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00023",
+   "loan_id": "LN00006",
+   "payment_date": "2024-03-11",
+   "amount": 25710,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00024",
+   "loan_id": "LN00007",
+   "payment_date": "2023-05-22",
+   "amount": 74800,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00025",
+   "loan_id": "LN00007",
+   "payment_date": "2023-06-21",
+   "amount": 74800,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00026",
+   "loan_id": "LN00007",
+   "payment_date": "2023-07-21",
+   "amount": 74800,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00027",
+   "loan_id": "LN00008",
+   "payment_date": "2024-01-28",
+   "amount": 35460,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00028",
+   "loan_id": "LN00008",
+   "payment_date": "2024-02-27",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00029",
+   "loan_id": "LN00008",
+   "payment_date": "2024-03-28",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00030",
+   "loan_id": "LN00008",
+   "payment_date": "2024-04-27",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00031",
+   "loan_id": "LN00008",
+   "payment_date": "2024-05-27",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00032",
+   "loan_id": "LN00008",
+   "payment_date": "2024-06-26",
+   "amount": 43850,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00033",
+   "loan_id": "LN00009",
+   "payment_date": "2024-03-18",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00034",
+   "loan_id": "LN00009",
+   "payment_date": "2024-04-17",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00035",
+   "loan_id": "LN00009",
+   "payment_date": "2024-05-17",
+   "amount": 43850,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00036",
+   "loan_id": "LN00010",
+   "payment_date": "2024-05-01",
+   "amount": 136590,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00037",
+   "loan_id": "LN00010",
+   "payment_date": "2024-05-31",
+   "amount": 126540,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00038",
+   "loan_id": "LN00011",
+   "payment_date": "2025-09-08",
+   "amount": 7720,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00039",
+   "loan_id": "LN00011",
+   "payment_date": "2025-10-08",
+   "amount": 7720,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00040",
+   "loan_id": "LN00011",
+   "payment_date": "2025-11-07",
+   "amount": 7720,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00041",
+   "loan_id": "LN00011",
+   "payment_date": "2025-12-07",
+   "amount": 6500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00042",
+   "loan_id": "LN00012",
+   "payment_date": "2026-04-09",
+   "amount": 15540,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00043",
+   "loan_id": "LN00012",
+   "payment_date": "2026-05-09",
+   "amount": 12330,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00044",
+   "loan_id": "LN00012",
+   "payment_date": "2026-06-08",
+   "amount": 26590,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00045",
+   "loan_id": "LN00012",
+   "payment_date": "2026-07-08",
+   "amount": 26590,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00046",
+   "loan_id": "LN00012",
+   "payment_date": "2026-08-07",
+   "amount": 26590,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00047",
+   "loan_id": "LN00012",
+   "payment_date": "2026-09-06",
+   "amount": 26590,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00048",
+   "loan_id": "LN00013",
+   "payment_date": "2022-08-05",
+   "amount": 15500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00049",
+   "loan_id": "LN00013",
+   "payment_date": "2022-09-04",
+   "amount": 15500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00050",
+   "loan_id": "LN00013",
+   "payment_date": "2022-10-04",
+   "amount": 15500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00051",
+   "loan_id": "LN00013",
+   "payment_date": "2022-11-03",
+   "amount": 15500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00052",
+   "loan_id": "LN00013",
+   "payment_date": "2022-12-03",
+   "amount": 15500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00053",
+   "loan_id": "LN00014",
+   "payment_date": "2024-03-29",
+   "amount": 55490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00054",
+   "loan_id": "LN00014",
+   "payment_date": "2024-04-28",
+   "amount": 55490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00055",
+   "loan_id": "LN00014",
+   "payment_date": "2024-05-28",
+   "amount": 55490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00056",
+   "loan_id": "LN00014",
+   "payment_date": "2024-06-27",
+   "amount": 55490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00057",
+   "loan_id": "LN00014",
+   "payment_date": "2024-07-27",
+   "amount": 55490,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00058",
+   "loan_id": "LN00015",
+   "payment_date": "2025-02-03",
+   "amount": 133490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00059",
+   "loan_id": "LN00015",
+   "payment_date": "2025-03-05",
+   "amount": 133490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00060",
+   "loan_id": "LN00015",
+   "payment_date": "2025-04-04",
+   "amount": 133490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00061",
+   "loan_id": "LN00015",
+   "payment_date": "2025-05-04",
+   "amount": 133490,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00062",
+   "loan_id": "LN00016",
+   "payment_date": "2026-02-17",
+   "amount": 33160,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00063",
+   "loan_id": "LN00016",
+   "payment_date": "2026-03-19",
+   "amount": 33160,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00064",
+   "loan_id": "LN00016",
+   "payment_date": "2026-04-18",
+   "amount": 33160,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00065",
+   "loan_id": "LN00016",
+   "payment_date": "2026-05-18",
+   "amount": 29350,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00066",
+   "loan_id": "LN00017",
+   "payment_date": "2024-12-05",
+   "amount": 74500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00067",
+   "loan_id": "LN00017",
+   "payment_date": "2025-01-04",
+   "amount": 52020,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00068",
+   "loan_id": "LN00017",
+   "payment_date": "2025-02-03",
+   "amount": 74500,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00069",
+   "loan_id": "LN00017",
+   "payment_date": "2025-03-05",
+   "amount": 74500,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00070",
+   "loan_id": "LN00017",
+   "payment_date": "2025-04-04",
+   "amount": 63310,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00071",
+   "loan_id": "LN00017",
+   "payment_date": "2025-05-04",
+   "amount": 74500,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00072",
+   "loan_id": "LN00018",
+   "payment_date": "2025-06-10",
+   "amount": 17920,
+   "payment_type": "Partial"
+  },
+  {
+   "payment_id": "PAY00073",
+   "loan_id": "LN00018",
+   "payment_date": "2025-07-10",
+   "amount": 17920,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00074",
+   "loan_id": "LN00019",
+   "payment_date": "2023-06-08",
+   "amount": 73240,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00075",
+   "loan_id": "LN00019",
+   "payment_date": "2023-07-08",
+   "amount": 73240,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00076",
+   "loan_id": "LN00019",
+   "payment_date": "2023-08-07",
+   "amount": 73240,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00077",
+   "loan_id": "LN00019",
+   "payment_date": "2023-09-06",
+   "amount": 73240,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00078",
+   "loan_id": "LN00020",
+   "payment_date": "2025-01-25",
+   "amount": 224340,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00079",
+   "loan_id": "LN00020",
+   "payment_date": "2025-02-24",
+   "amount": 224340,
+   "payment_type": "EMI"
+  },
+  {
+   "payment_id": "PAY00080",
+   "loan_id": "LN00020",
+   "payment_date": "2025-03-26",
+   "amount": 224340,
+   "payment_type": "Manual"
+  },
+  {
+   "payment_id": "PAY00081",
+   "loan_id": "LN00020",
+   "payment_date": "2025-04-25",
+   "amount": 224340,
+   "payment_type": "EMI"
+  }
+ ],
+ "bureau": [
+  {
+   "report_id": "RPT00001",
+   "loan_id": "LN00011",
+   "report_date": "2026-10-06",
+   "reported_status": "PDO2",
+   "days_past_due_reported": 45
+  },
+  {
+   "report_id": "RPT00002",
+   "loan_id": "LN00012",
+   "report_date": "2026-10-06",
+   "reported_status": "PDO2",
+   "days_past_due_reported": 49
+  },
+  {
+   "report_id": "RPT00003",
+   "loan_id": "LN00013",
+   "report_date": "2026-10-11",
+   "reported_status": "PDO2",
+   "days_past_due_reported": 55
+  },
+  {
+   "report_id": "RPT00004",
+   "loan_id": "LN00014",
+   "report_date": "2026-10-09",
+   "reported_status": "PDO2",
+   "days_past_due_reported": 43
+  },
+  {
+   "report_id": "RPT00005",
+   "loan_id": "LN00015",
+   "report_date": "2026-10-07",
+   "reported_status": "PDO3",
+   "days_past_due_reported": 85
+  },
+  {
+   "report_id": "RPT00006",
+   "loan_id": "LN00016",
+   "report_date": "2026-10-02",
+   "reported_status": "PDO3",
+   "days_past_due_reported": 89
+  },
+  {
+   "report_id": "RPT00007",
+   "loan_id": "LN00017",
+   "report_date": "2026-10-15",
+   "reported_status": "PDO3",
+   "days_past_due_reported": 80
+  },
+  {
+   "report_id": "RPT00008",
+   "loan_id": "LN00018",
+   "report_date": "2026-10-11",
+   "reported_status": "NAB",
+   "days_past_due_reported": 115
+  },
+  {
+   "report_id": "RPT00009",
+   "loan_id": "LN00019",
+   "report_date": "2026-10-11",
+   "reported_status": "NAB",
+   "days_past_due_reported": 131
+  },
+  {
+   "report_id": "RPT00010",
+   "loan_id": "LN00020",
+   "report_date": "2026-10-12",
+   "reported_status": "Written_Off",
+   "days_past_due_reported": 212
+  }
+ ],
+ "recommendations": [
+  {
+   "loan_id": "LN00001",
+   "customer_name": "Meera Sharma",
+   "days_past_due": 0,
+   "recorded_status": "Normal",
+   "recommended_status": "Normal",
+   "status_match": "Yes",
+   "case_status": "No case",
+   "escalation_level": null,
+   "assigned_agent": null,
+   "recommended_action": "No action \u2014 loan current",
+   "decision_type": "Auto",
+   "reason": "Days past due = 0"
+  },
+  {
+   "loan_id": "LN00002",
+   "customer_name": "Vijay Singh",
+   "days_past_due": 0,
+   "recorded_status": "Normal",
+   "recommended_status": "Normal",
+   "status_match": "Yes",
+   "case_status": "No case",
+   "escalation_level": null,
+   "assigned_agent": null,
+   "recommended_action": "No action \u2014 loan current",
+   "decision_type": "Auto",
+   "reason": "Days past due = 0"
+  },
+  {
+   "loan_id": "LN00003",
+   "customer_name": "Lata Gupta",
+   "days_past_due": 0,
+   "recorded_status": "Normal",
+   "recommended_status": "Normal",
+   "status_match": "Yes",
+   "case_status": "No case",
+   "escalation_level": null,
+   "assigned_agent": null,
+   "recommended_action": "No action \u2014 loan current",
+   "decision_type": "Auto",
+   "reason": "Days past due = 0"
+  },
+  {
+   "loan_id": "LN00004",
+   "customer_name": "Amit Mehta",
+   "days_past_due": 0,
+   "recorded_status": "Normal",
+   "recommended_status": "Normal",
+   "status_match": "Yes",
+   "case_status": "No case",
+   "escalation_level": null,
+   "assigned_agent": null,
+   "recommended_action": "No action \u2014 loan current",
+   "decision_type": "Auto",
+   "reason": "Days past due = 0"
+  },
+  {
+   "loan_id": "LN00005",
+   "customer_name": "Neha Menon",
+   "days_past_due": 0,
+   "recorded_status": "Normal",
+   "recommended_status": "Normal",
+   "status_match": "Yes",
+   "case_status": "No case",
+   "escalation_level": null,
+   "assigned_agent": null,
+   "recommended_action": "No action \u2014 loan current",
+   "decision_type": "Auto",
+   "reason": "Days past due = 0"
+  },
+  {
+   "loan_id": "LN00006",
+   "customer_name": "Arjun Shetty",
+   "days_past_due": 0,
+   "recorded_status": "Normal",
+   "recommended_status": "Normal",
+   "status_match": "Yes",
+   "case_status": "No case",
+   "escalation_level": null,
+   "assigned_agent": null,
+   "recommended_action": "No action \u2014 loan current",
+   "decision_type": "Auto",
+   "reason": "Days past due = 0"
+  },
+  {
+   "loan_id": "LN00007",
+   "customer_name": "Arjun Patel",
+   "days_past_due": 28,
+   "recorded_status": "PDO1",
+   "recommended_status": "PDO1",
+   "status_match": "Yes",
+   "case_status": "P2P_Honoured",
+   "escalation_level": 0,
+   "assigned_agent": "AgentPro Collections (Outsourced)",
+   "recommended_action": "Continue reminders; monitor for P2P",
+   "decision_type": "Auto",
+   "reason": "PDO1, existing case status = P2P_Honoured"
+  },
+  {
+   "loan_id": "LN00008",
+   "customer_name": "Deepak Mehta",
+   "days_past_due": 7,
+   "recorded_status": "PDO1",
+   "recommended_status": "PDO1",
+   "status_match": "Yes",
+   "case_status": "P2P_Honoured",
+   "escalation_level": 0,
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "recommended_action": "Continue reminders; monitor for P2P",
+   "decision_type": "Auto",
+   "reason": "PDO1, existing case status = P2P_Honoured"
+  },
+  {
+   "loan_id": "LN00009",
+   "customer_name": "Arjun Menon",
+   "days_past_due": 9,
+   "recorded_status": "PDO1",
+   "recommended_status": "PDO1",
+   "status_match": "Yes",
+   "case_status": "Open",
+   "escalation_level": 0,
+   "assigned_agent": "S. Naik (Internal)",
+   "recommended_action": "Continue reminders; monitor for P2P",
+   "decision_type": "Auto",
+   "reason": "PDO1, existing case status = Open"
+  },
+  {
+   "loan_id": "LN00010",
+   "customer_name": "Amit Patel",
+   "days_past_due": 9,
+   "recorded_status": "PDO1",
+   "recommended_status": "PDO1",
+   "status_match": "Yes",
+   "case_status": "Open",
+   "escalation_level": 0,
+   "assigned_agent": "M. Iyer (Internal)",
+   "recommended_action": "Continue reminders; monitor for P2P",
+   "decision_type": "Auto",
+   "reason": "PDO1, existing case status = Open"
+  },
+  {
+   "loan_id": "LN00011",
+   "customer_name": "Rahul Agarwal",
+   "days_past_due": 45,
+   "recorded_status": "PDO2",
+   "recommended_status": "PDO2",
+   "status_match": "Yes",
+   "case_status": "P2P_Set",
+   "escalation_level": 0,
+   "assigned_agent": "R. Thakur (Internal)",
+   "recommended_action": "Monitor P2P due 2026-09-07 00:00:00",
+   "decision_type": "Auto",
+   "reason": "Customer has an open promise-to-pay, not yet due or broken"
+  },
+  {
+   "loan_id": "LN00012",
+   "customer_name": "Sanjay Iyer",
+   "days_past_due": 49,
+   "recorded_status": "PDO2",
+   "recommended_status": "PDO2",
+   "status_match": "Yes",
+   "case_status": "Open",
+   "escalation_level": 0,
+   "assigned_agent": "AgentPro Collections (Outsourced)",
+   "recommended_action": "Agent to contact customer, establish new P2P",
+   "decision_type": "Auto",
+   "reason": "Case open (Open), no P2P on file yet"
+  },
+  {
+   "loan_id": "LN00013",
+   "customer_name": "Vijay Kulkarni",
+   "days_past_due": 55,
+   "recorded_status": "PDO2",
+   "recommended_status": "PDO2",
+   "status_match": "Yes",
+   "case_status": "Open",
+   "escalation_level": 1,
+   "assigned_agent": "S. Naik (Internal)",
+   "recommended_action": "Agent to contact customer, establish new P2P",
+   "decision_type": "Auto",
+   "reason": "Case open (Open), no P2P on file yet"
+  },
+  {
+   "loan_id": "LN00014",
+   "customer_name": "Meera Iyer",
+   "days_past_due": 43,
+   "recorded_status": "PDO2",
+   "recommended_status": "PDO2",
+   "status_match": "Yes",
+   "case_status": "P2P_Set",
+   "escalation_level": 0,
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "recommended_action": "Monitor P2P due 2026-09-17 00:00:00",
+   "decision_type": "Auto",
+   "reason": "Customer has an open promise-to-pay, not yet due or broken"
+  },
+  {
+   "loan_id": "LN00015",
+   "customer_name": "Suresh Mehta",
+   "days_past_due": 85,
+   "recorded_status": "PDO3",
+   "recommended_status": "PDO3",
+   "status_match": "Yes",
+   "case_status": "Escalated",
+   "escalation_level": 1,
+   "assigned_agent": "R. Thakur (Internal)",
+   "recommended_action": "Proceed with escalation matrix (field visit / reference calls)",
+   "decision_type": "Human-required",
+   "reason": "Case already escalated per prior cycle"
+  },
+  {
+   "loan_id": "LN00016",
+   "customer_name": "Amit Reddy",
+   "days_past_due": 89,
+   "recorded_status": "PDO3",
+   "recommended_status": "PDO3",
+   "status_match": "Yes",
+   "case_status": "P2P_Broken",
+   "escalation_level": 1,
+   "assigned_agent": "S. Naik (Internal)",
+   "recommended_action": "Force escalation \u2014 repeated broken P2P (hard rule, no agent override)",
+   "decision_type": "Human-required",
+   "reason": "escalation_level=1, case_status=P2P_Broken \u2014 exceeds allowed cycles"
+  },
+  {
+   "loan_id": "LN00017",
+   "customer_name": "Suresh Nair",
+   "days_past_due": 80,
+   "recorded_status": "PDO3",
+   "recommended_status": "PDO3",
+   "status_match": "Yes",
+   "case_status": "P2P_Broken",
+   "escalation_level": 2,
+   "assigned_agent": "S. Naik (Internal)",
+   "recommended_action": "Force escalation \u2014 repeated broken P2P (hard rule, no agent override)",
+   "decision_type": "Human-required",
+   "reason": "escalation_level=2, case_status=P2P_Broken \u2014 exceeds allowed cycles"
+  },
+  {
+   "loan_id": "LN00018",
+   "customer_name": "Vikram Pillai",
+   "days_past_due": 115,
+   "recorded_status": "NAB",
+   "recommended_status": "NAB",
+   "status_match": "Yes",
+   "case_status": "Escalated",
+   "escalation_level": 2,
+   "assigned_agent": "M. Iyer (Internal)",
+   "recommended_action": "Stop interest accrual / reclassify to NAB in core system; Evaluate for legal notice or moratorium offer",
+   "decision_type": "Human-required",
+   "reason": "Loan in non-accrual territory \u2014 multiple human-approval actions required"
+  },
+  {
+   "loan_id": "LN00019",
+   "customer_name": "Ravi Reddy",
+   "days_past_due": 131,
+   "recorded_status": "NAB",
+   "recommended_status": "NAB",
+   "status_match": "Yes",
+   "case_status": "Escalated",
+   "escalation_level": 2,
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "recommended_action": "Stop interest accrual / reclassify to NAB in core system; Evaluate for legal notice or moratorium offer",
+   "decision_type": "Human-required",
+   "reason": "Loan in non-accrual territory \u2014 multiple human-approval actions required"
+  },
+  {
+   "loan_id": "LN00020",
+   "customer_name": "Arjun Kumar",
+   "days_past_due": 212,
+   "recorded_status": "Written_Off",
+   "recommended_status": "Written_Off",
+   "status_match": "Yes",
+   "case_status": "Closed",
+   "escalation_level": 3,
+   "assigned_agent": "QuickRecover Agency (Outsourced)",
+   "recommended_action": "No further collection action \u2014 write-off already recorded",
+   "decision_type": "Auto",
+   "reason": "Loan previously written off by risk/asset committee; engine takes no further action"
+  }
+ ],
+ "ai_drafts": [
+  {
+   "loan_id": "LN00007",
+   "customer_name": "Arjun Patel",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Arjun, your loan installment is now 28 day(s) overdue. Please make the payment at your earliest convenience to avoid further charges. If already paid, kindly ignore this message.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00008",
+   "customer_name": "Deepak Mehta",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Deepak, your loan installment is now 7 day(s) overdue. Please make the payment at your earliest convenience to avoid further charges. If already paid, kindly ignore this message.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00009",
+   "customer_name": "Arjun Menon",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Arjun, your loan installment is now 9 day(s) overdue. Please make the payment at your earliest convenience to avoid further charges. If already paid, kindly ignore this message.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00010",
+   "customer_name": "Amit Patel",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Amit, your loan installment is now 9 day(s) overdue. Please make the payment at your earliest convenience to avoid further charges. If already paid, kindly ignore this message.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00011",
+   "customer_name": "Rahul Agarwal",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Rahul, your loan account is 45 days past due. Please note that continued non-payment may lead to further steps. We encourage you to settle the overdue amount or contact our collection team to discuss available options.",
+   "revision_note": "Issues found and fixed: Mentions legal action, but status is not yet NAB/escalated \u2014 too strong for this stage",
+   "was_revised": "Yes"
+  },
+  {
+   "loan_id": "LN00012",
+   "customer_name": "Sanjay Iyer",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Sanjay, your loan account is 49 days past due. Please note that continued non-payment may lead to further steps. We encourage you to settle the overdue amount or contact our collection team to discuss available options.",
+   "revision_note": "Issues found and fixed: Mentions legal action, but status is not yet NAB/escalated \u2014 too strong for this stage",
+   "was_revised": "Yes"
+  },
+  {
+   "loan_id": "LN00013",
+   "customer_name": "Vijay Kulkarni",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Vijay, your loan account is 55 days past due. Please note that continued non-payment may lead to further steps. We encourage you to settle the overdue amount or contact our collection team to discuss available options.",
+   "revision_note": "Issues found and fixed: Mentions legal action, but status is not yet NAB/escalated \u2014 too strong for this stage",
+   "was_revised": "Yes"
+  },
+  {
+   "loan_id": "LN00014",
+   "customer_name": "Meera Iyer",
+   "draft_type": "Customer Message",
+   "final_text": "Dear Meera, your loan account is 43 days past due. Please note that continued non-payment may lead to further steps. We encourage you to settle the overdue amount or contact our collection team to discuss available options.",
+   "revision_note": "Issues found and fixed: Mentions legal action, but status is not yet NAB/escalated \u2014 too strong for this stage",
+   "was_revised": "Yes"
+  },
+  {
+   "loan_id": "LN00015",
+   "customer_name": "Suresh Mehta",
+   "draft_type": "Case Summary (for officer)",
+   "final_text": "Loan LN00015 (Suresh Mehta) is 85 days past due, currently at status PDO3. Case history shows status 'Escalated' with escalation level 1, assigned to R. Thakur (Internal). System recommendation: Proceed with escalation matrix (field visit / reference calls). Reason flagged for human review: Case already escalated per prior cycle.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00016",
+   "customer_name": "Amit Reddy",
+   "draft_type": "Case Summary (for officer)",
+   "final_text": "Loan LN00016 (Amit Reddy) is 89 days past due, currently at status PDO3. Case history shows status 'P2P_Broken' with escalation level 1, assigned to S. Naik (Internal). System recommendation: Force escalation \u2014 repeated broken P2P (hard rule, no agent override). Reason flagged for human review: escalation_level=1, case_status=P2P_Broken \u2014 exceeds allowed cycles.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00017",
+   "customer_name": "Suresh Nair",
+   "draft_type": "Case Summary (for officer)",
+   "final_text": "Loan LN00017 (Suresh Nair) is 80 days past due, currently at status PDO3. Case history shows status 'P2P_Broken' with escalation level 2, assigned to S. Naik (Internal). System recommendation: Force escalation \u2014 repeated broken P2P (hard rule, no agent override). Reason flagged for human review: escalation_level=2, case_status=P2P_Broken \u2014 exceeds allowed cycles.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00018",
+   "customer_name": "Vikram Pillai",
+   "draft_type": "Case Summary (for officer)",
+   "final_text": "Loan LN00018 (Vikram Pillai) is 115 days past due, currently at status NAB. Case history shows status 'Escalated' with escalation level 2, assigned to M. Iyer (Internal). System recommendation: Stop interest accrual / reclassify to NAB in core system; Evaluate for legal notice or moratorium offer. Reason flagged for human review: Loan in non-accrual territory \u2014 multiple human-approval actions required.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  },
+  {
+   "loan_id": "LN00019",
+   "customer_name": "Ravi Reddy",
+   "draft_type": "Case Summary (for officer)",
+   "final_text": "Loan LN00019 (Ravi Reddy) is 131 days past due, currently at status NAB. Case history shows status 'Escalated' with escalation level 2, assigned to QuickRecover Agency (Outsourced). System recommendation: Stop interest accrual / reclassify to NAB in core system; Evaluate for legal notice or moratorium offer. Reason flagged for human review: Loan in non-accrual territory \u2014 multiple human-approval actions required.",
+   "revision_note": "Passed on first draft \u2014 no issues found",
+   "was_revised": "No"
+  }
+ ],
+ "approvals": [
+  {
+   "loan_id": "LN00015",
+   "customer_name": "Suresh Mehta",
+   "recommended_action": "Proceed with escalation matrix (field visit / reference calls)",
+   "reason_flagged": "Case already escalated per prior cycle",
+   "decision": "Approved",
+   "decided_by": "P. Rao (Senior Collections Officer)",
+   "decided_at": "2026-10-17 00:41",
+   "comment": "Field visit authorised. Agent to report back within 5 working days."
+  },
+  {
+   "loan_id": "LN00016",
+   "customer_name": "Amit Reddy",
+   "recommended_action": "Force escalation \u2014 repeated broken P2P (hard rule, no agent override)",
+   "reason_flagged": "escalation_level=1, case_status=P2P_Broken \u2014 exceeds allowed cycles",
+   "decision": "Approved",
+   "decided_by": "P. Rao (Senior Collections Officer)",
+   "decided_at": "2026-10-15 16:41",
+   "comment": "Confirmed \u2014 repeated broken P2P, proceeding to escalation per policy. No further P2P extensions to be granted."
+  },
+  {
+   "loan_id": "LN00017",
+   "customer_name": "Suresh Nair",
+   "recommended_action": "Force escalation \u2014 repeated broken P2P (hard rule, no agent override)",
+   "reason_flagged": "escalation_level=2, case_status=P2P_Broken \u2014 exceeds allowed cycles",
+   "decision": "Approved",
+   "decided_by": "N. Fernandes (Collections Manager)",
+   "decided_at": "2026-10-17 05:41",
+   "comment": "Confirmed \u2014 repeated broken P2P, proceeding to escalation per policy. No further P2P extensions to be granted."
+  },
+  {
+   "loan_id": "LN00018",
+   "customer_name": "Vikram Pillai",
+   "recommended_action": "Stop interest accrual / reclassify to NAB in core system; Evaluate for legal notice or moratorium offer",
+   "reason_flagged": "Loan in non-accrual territory \u2014 multiple human-approval actions required",
+   "decision": "Approved with edits",
+   "decided_by": "A. D'Souza (Risk & Recovery)",
+   "decided_at": "2026-10-17 03:41",
+   "comment": "Hold legal notice for now \u2014 offering moratorium discussion first, per customer's repayment history. Reclassify to NAB as recommended."
+  },
+  {
+   "loan_id": "LN00019",
+   "customer_name": "Ravi Reddy",
+   "recommended_action": "Stop interest accrual / reclassify to NAB in core system; Evaluate for legal notice or moratorium offer",
+   "reason_flagged": "Loan in non-accrual territory \u2014 multiple human-approval actions required",
+   "decision": "Approved",
+   "decided_by": "A. D'Souza (Risk & Recovery)",
+   "decided_at": "2026-10-17 06:41",
+   "comment": "Reclassify to NAB and proceed with legal notice preparation. Escalate to legal team."
+  }
+ ],
+ "audit_log": [
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00001",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=0 -> Normal (matches recorded status Normal)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00002",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=0 -> Normal (matches recorded status Normal)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00003",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=0 -> Normal (matches recorded status Normal)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00004",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=0 -> Normal (matches recorded status Normal)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00005",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=0 -> Normal (matches recorded status Normal)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00006",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=0 -> Normal (matches recorded status Normal)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00007",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=28 -> PDO1 (matches recorded status PDO1)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00008",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=7 -> PDO1 (matches recorded status PDO1)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00009",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=9 -> PDO1 (matches recorded status PDO1)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00010",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=9 -> PDO1 (matches recorded status PDO1)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00011",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=45 -> PDO2 (matches recorded status PDO2)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00012",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=49 -> PDO2 (matches recorded status PDO2)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00013",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=55 -> PDO2 (matches recorded status PDO2)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00014",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=43 -> PDO2 (matches recorded status PDO2)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00015",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=85 -> PDO3 (matches recorded status PDO3)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00016",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=89 -> PDO3 (matches recorded status PDO3)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00016",
+   "rule_applied": "forced_escalation_rule",
+   "outcome": "Broken P2P with escalation_level=1 -> forced escalation, agent override disabled"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00017",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=80 -> PDO3 (matches recorded status PDO3)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00017",
+   "rule_applied": "forced_escalation_rule",
+   "outcome": "Broken P2P with escalation_level=2 -> forced escalation, agent override disabled"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00018",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=115 -> NAB (matches recorded status NAB)"
+  },
+  {
+   "timestamp": "2026-10-16T12:20:22",
+   "loan_id": "LN00019",
+   "rule_applied": "dpd_to_status_bucket",
+   "outcome": "dpd=131 -> NAB (matches recorded status NAB)"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00001",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No action \u2014 loan current"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00002",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No action \u2014 loan current"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00003",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No action \u2014 loan current"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00004",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No action \u2014 loan current"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00005",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No action \u2014 loan current"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00006",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No action \u2014 loan current"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00007",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Continue reminders; monitor for P2P"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00008",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Continue reminders; monitor for P2P"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00009",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Continue reminders; monitor for P2P"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00010",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Continue reminders; monitor for P2P"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00011",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Monitor P2P due 2026-09-07 00:00:00"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00012",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Agent to contact customer, establish new P2P"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00013",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Agent to contact customer, establish new P2P"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00014",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: Monitor P2P due 2026-09-17 00:00:00"
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00015",
+   "rule_applied": "human_approval_decision",
+   "outcome": "Approved by P. Rao (Senior Collections Officer) at 2026-10-17 00:41 \u2014 Field visit authorised. Agent to report back within 5 working days."
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00016",
+   "rule_applied": "human_approval_decision",
+   "outcome": "Approved by P. Rao (Senior Collections Officer) at 2026-10-15 16:41 \u2014 Confirmed \u2014 repeated broken P2P, proceeding to escalation per policy. No further P2P extensions to be granted."
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00017",
+   "rule_applied": "human_approval_decision",
+   "outcome": "Approved by N. Fernandes (Collections Manager) at 2026-10-17 05:41 \u2014 Confirmed \u2014 repeated broken P2P, proceeding to escalation per policy. No further P2P extensions to be granted."
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00018",
+   "rule_applied": "human_approval_decision",
+   "outcome": "Approved with edits by A. D'Souza (Risk & Recovery) at 2026-10-17 03:41 \u2014 Hold legal notice for now \u2014 offering moratorium discussion first, per customer's repayment history. Reclassify to NAB as recommended."
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00019",
+   "rule_applied": "human_approval_decision",
+   "outcome": "Approved by A. D'Souza (Risk & Recovery) at 2026-10-17 06:41 \u2014 Reclassify to NAB and proceed with legal notice preparation. Escalate to legal team."
+  },
+  {
+   "timestamp": "2026-10-17T10:41:03",
+   "loan_id": "LN00020",
+   "rule_applied": "auto_execution",
+   "outcome": "Auto-executed without human approval: No further collection action \u2014 write-off already recorded"
+  }
+ ]
+}
+</script>
+
+<script>
+(function(){
+  "use strict";
+  const DATA = JSON.parse(document.getElementById('dashboard-data').textContent);
+
+  // ---- join everything by loan_id into one record ----
+  const byId = (arr) => Object.fromEntries(arr.map(r => [r.loan_id, r]));
+  const loansById = byId(DATA.loans);
+  const draftsById = byId(DATA.ai_drafts);
+  const approvalsById = byId(DATA.approvals);
+  const auditByLoan = {};
+  DATA.audit_log.forEach(a => {
+    (auditByLoan[a.loan_id] ||= []).push(a);
+  });
+
+  const records = DATA.recommendations.map(rec => {
+    const loan = loansById[rec.loan_id] || {};
+    return {
+      rec, loan,
+      draft: draftsById[rec.loan_id] || null,
+      approval: approvalsById[rec.loan_id] || null,
+      audit: (auditByLoan[rec.loan_id] || []).slice().sort((a,b)=> a.timestamp.localeCompare(b.timestamp)),
+    };
+  });
+
+  // ---- stats ----
+  const totalLoans = records.length;
+  const autoCount = records.filter(r => r.rec.decision_type === 'Auto').length;
+  const humanCount = records.filter(r => r.rec.decision_type === 'Human-required').length;
+  const auditCount = DATA.audit_log.length;
+  document.getElementById('stat-total').textContent = totalLoans;
+  document.getElementById('stat-auto').textContent = autoCount;
+  document.getElementById('stat-human').textContent = humanCount;
+  document.getElementById('stat-audit').textContent = auditCount;
+
+  // ---- helpers ----
+  const statusClass = (s) => 's' && {
+    Normal:'st-normal', PDO1:'st-pdo1', PDO2:'st-pdo2', PDO3:'st-pdo3',
+    NAB:'st-nab', Written_Off:'st-written_off'
+  }[s] || 'st-normal';
+  const statusLabel = (s) => s === 'Written_Off' ? 'Written off' : s;
+  const fmtINR = (n) => n == null ? '—' : '₹' + Number(n).toLocaleString('en-IN');
+  const fmtDate = (d) => d || '—';
+  const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  function auditRow(a){
+    return `<div class="audit-item">
+      <div class="t">${esc(a.timestamp.replace('T',' '))}</div>
+      <div class="r">${esc(a.rule_applied)}</div>
+      <div class="o">${esc(a.outcome)}</div>
+    </div>`;
+  }
+
+  function detailHTML(item){
+    const { rec, loan, draft, approval, audit } = item;
+    const facts = [
+      ['Product', loan.product_type || '—'],
+      ['Principal', fmtINR(loan.principal_amount)],
+      ['EMI', fmtINR(loan.emi_amount)],
+      ['Rate', loan.interest_rate != null ? loan.interest_rate + '%' : '—'],
+      ['Disbursed', fmtDate(loan.disbursement_date)],
+      ['Next due', fmtDate(loan.next_due_date)],
+      ['Last payment', fmtDate(loan.last_payment_date)],
+      ['Days past due', rec.days_past_due],
+    ];
+
+    const caseInfo = rec.case_status && rec.case_status !== 'No case'
+      ? `<div class="reason"><b style="color:var(--ink)">Case:</b> ${esc(rec.case_status)} &middot; escalation level ${esc(rec.escalation_level ?? 0)} &middot; agent ${esc(rec.assigned_agent || '—')}</div>`
+      : '';
+
+    const draftBlock = draft ? `
+      <div class="block ai">
+        <div class="block-head"><span class="ico">AI</span><h3>${esc(draft.draft_type)}</h3></div>
+        <div class="draft-text">${esc(draft.final_text)}</div>
+        ${draft.was_revised === 'Yes'
+          ? `<div class="revise-tag">&#9889; Revised after reflection</div><div class="revise-note">${esc(draft.revision_note)}</div>`
+          : `<div class="revise-note">${esc(draft.revision_note)}</div>`}
+      </div>` : '';
+
+    const approvalBlock = approval ? `
+      <div class="block approval">
+        <div class="block-head"><span class="ico">&#9989;</span><h3>Human approval</h3></div>
+        <span class="decision-pill ${approval.decision === 'Approved with edits' ? 'edited' : ''}">${esc(approval.decision)}</span>
+        <div class="approval-meta">
+          <span><b>By:</b> ${esc(approval.decided_by)}</span>
+          <span><b>At:</b> ${esc(approval.decided_at)}</span>
+        </div>
+        <div class="comment">&ldquo;${esc(approval.comment)}&rdquo;</div>
+      </div>` : (rec.decision_type === 'Auto' ? `
+      <div class="block approval">
+        <div class="block-head"><span class="ico">&#9889;</span><h3>No approval needed</h3></div>
+        <div class="reason">System executed automatically — recorded in the audit log, no sign-off required for this decision type.</div>
+      </div>` : '');
+
+    const auditBlock = audit.length ? `
+      <div class="block audit">
+        <div class="block-head"><span class="ico">&#128220;</span><h3>Audit trail (${audit.length})</h3></div>
+        <div class="audit-list">${audit.map(auditRow).join('')}</div>
+      </div>` : '';
+
+    return `
+      <div class="detail">
+        <div class="detail-grid">
+          ${facts.map(([k,v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}
+        </div>
+        <div class="block engine">
+          <div class="block-head"><span class="ico">&#9881;</span><h3>Rules engine recommendation</h3></div>
+          <div style="font-size:13px; font-weight:600; margin-bottom:4px;">${esc(rec.recommended_action)}</div>
+          <div class="reason">${esc(rec.reason)}</div>
+          ${caseInfo}
+        </div>
+        ${draftBlock}
+        ${approvalBlock}
+        ${auditBlock}
+      </div>`;
+  }
+
+  function rowHTML(item){
+    const { rec, loan } = item;
+    const decisionClass = rec.decision_type === 'Auto' ? 'dec-auto' : 'dec-human';
+    return `
+      <div class="col-id mono">${esc(rec.loan_id)}</div>
+      <div class="col-name">
+        <div class="n">${esc(rec.customer_name)}</div>
+        <div class="p">${esc(loan.product_type || '')}</div>
+      </div>
+      <div class="col-dpd">${rec.days_past_due} day${rec.days_past_due === 1 ? '' : 's'} overdue</div>
+      <span class="badge ${statusClass(rec.recommended_status)}"><span class="dot"></span>${esc(statusLabel(rec.recommended_status))}</span>
+      <span class="badge ${decisionClass}">${rec.decision_type === 'Auto' ? 'Auto' : 'Human-required'}</span>
+      <svg class="chev" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    `;
+  }
+
+  // ---- render ----
+  const worklist = document.getElementById('worklist');
+  let activeFilter = 'all';
+  let searchTerm = '';
+
+  function matches(item){
+    const statusOk = activeFilter === 'all' || item.rec.recommended_status === activeFilter;
+    const q = searchTerm.trim().toLowerCase();
+    const searchOk = !q || item.rec.loan_id.toLowerCase().includes(q) || item.rec.customer_name.toLowerCase().includes(q);
+    return statusOk && searchOk;
+  }
+
+  function render(){
+    const visible = records.filter(matches);
+    if (!visible.length){
+      worklist.innerHTML = `<div class="empty">No loans match this filter.</div>`;
+      return;
+    }
+    worklist.innerHTML = visible.map(item => `
+      <div class="card" data-id="${esc(item.rec.loan_id)}" data-open="false">
+        <div class="row" role="button" tabindex="0" aria-expanded="false">
+          ${rowHTML(item)}
+        </div>
+      </div>
+    `).join('');
+
+    visible.forEach(item => {
+      const card = worklist.querySelector(`.card[data-id="${CSS.escape(item.rec.loan_id)}"]`);
+      const row = card.querySelector('.row');
+      const toggle = () => {
+        const isOpen = card.getAttribute('data-open') === 'true';
+        if (isOpen){
+          card.setAttribute('data-open','false');
+          row.setAttribute('aria-expanded','false');
+          const d = card.querySelector('.detail');
+          if (d) d.remove();
+        } else {
+          card.setAttribute('data-open','true');
+          row.setAttribute('aria-expanded','true');
+          card.insertAdjacentHTML('beforeend', detailHTML(item));
+        }
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
+      });
+    });
+  }
+
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed','false'));
+      chip.setAttribute('aria-pressed','true');
+      activeFilter = chip.dataset.filter;
+      render();
+    });
+  });
+
+  document.getElementById('search').addEventListener('input', (e) => {
+    searchTerm = e.target.value;
+    render();
+  });
+
+  render();
+})();
+</script>
