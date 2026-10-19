@@ -4,7 +4,7 @@ A working prototype of an AI-assisted loan collections workflow for a bank, buil
 
 **This is a portfolio / learning project.** All customer names, loan numbers, and amounts are synthetic. It is not connected to any real bank system.
 
-🔗 **[Open the live dashboard](#)** *(replace with your GitHub Pages link once enabled — see "Viewing the dashboard" below)*
+🔗  **[Open the live dashboard](https://girinehe.github.io/loan-collection-ai-assistant/dashboard.html)**
 
 ---
 
